@@ -4,3 +4,4 @@ plotly>=5.22.0
 pandas>=2.2.0
 pykrx>=1.0.45
 streamlit-autorefresh>=0.0.1
+setuptools>=70.0.0
