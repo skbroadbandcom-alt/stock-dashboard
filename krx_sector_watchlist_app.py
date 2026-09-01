@@ -8,17 +8,17 @@ import json
 import os
 from streamlit_autorefresh import st_autorefresh
 
-st.set_page_config(page_title="KRX Stock Dashboard", layout="wide", initial_sidebar_state="expanded")
+st.set_page_config(page_title="🇰🇷 한국 주식 섹터 대시보드", layout="wide", initial_sidebar_state="expanded")
 
 SECTOR_ETFS = {
-    "Semiconductor": "091160", "Battery": "364990", "Bio": "244580",
-    "Bank": "091170", "Auto": "091180", "Securities": "102970",
-    "IT": "266370", "EnergyChem": "117460", "Steel": "117680",
-    "Construction": "117700", "Transport": "140710", "MediaEnter": "266360",
-    "Machinery": "102960", "Insurance": "140700", "Distribution": "091220",
-    "Staples": "266390", "Discretionary": "266400", "KOSPI200": "069500",
+    "반도체": "091160", "2차전지": "364990", "바이오": "244580",
+    "은행": "091170", "자동차": "091180", "증권": "102970",
+    "IT": "266370", "에너지화학": "117460", "철강": "117680",
+    "건설": "117700", "운송": "140710", "미디어&엔터": "266360",
+    "기계장비": "102960", "보험": "140700", "유통": "091220",
+    "필수소비재": "266390", "임의소비재": "266400", "코스피200": "069500",
 }
-SECTOR_LIST = list(SECTOR_ETFS.keys()) + ["Other"]
+SECTOR_LIST = list(SECTOR_ETFS.keys()) + ["기타"]
 WATCHLIST_FILE = "watchlist.json"
 DEPLOY_MODE = os.environ.get("DEPLOY_MODE", "local").lower() == "cloud"
 
@@ -28,14 +28,14 @@ def get_kst_now():
 def is_market_open():
     now = get_kst_now()
     if now.weekday() >= 5:
-        return False, "Closed (Weekend)"
+        return False, "휴장 (주말)"
     mo = now.replace(hour=9, minute=0, second=0, microsecond=0)
     mc = now.replace(hour=15, minute=30, second=0, microsecond=0)
     if now < mo:
-        return False, "Pre-market"
+        return False, "장전 (09:00 개장 예정)"
     elif now > mc:
-        return False, "Market Closed"
-    return True, "Market Open"
+        return False, "장마감"
+    return True, "장중"
 
 def load_watchlist():
     if DEPLOY_MODE:
@@ -101,9 +101,9 @@ def get_sector_performance(ticker, days):
         sp = df['Close'].iloc[0]
         ep = df['Close'].iloc[-1]
         return {
-            "price": int(ep),
-            "change_pct": round((ep - sp) / sp * 100, 2),
-            "volume_bil": round((df['Volume'] * df['Close']).mean() / 1e8, 1),
+            "현재가": int(ep),
+            "등락률(%)": round((ep - sp) / sp * 100, 2),
+            "거래대금(억)": round((df['Volume'] * df['Close']).mean() / 1e8, 1),
         }
     except:
         return None
@@ -118,11 +118,11 @@ def get_stock_data(ticker, days):
             return None, None
         chg = (df['Close'].iloc[-1] - df['Close'].iloc[0]) / df['Close'].iloc[0] * 100
         info = {
-            "price": int(df['Close'].iloc[-1]),
-            "change_pct": round(chg, 2),
-            "volume_bil": round((df['Volume'].iloc[-1] * df['Close'].iloc[-1]) / 1e8, 1),
-            "high": int(df['High'].max()),
-            "low": int(df['Low'].min()),
+            "현재가": int(df['Close'].iloc[-1]),
+            "등락률(%)": round(chg, 2),
+            "거래대금(억)": round((df['Volume'].iloc[-1] * df['Close'].iloc[-1]) / 1e8, 1),
+            "고가": int(df['High'].max()),
+            "저가": int(df['Low'].min()),
         }
         return info, df
     except:
@@ -151,7 +151,7 @@ status_color = "🟢" if market_open else "🔴"
 
 hc1, hc2 = st.columns([4, 1])
 with hc1:
-    st.title("KRX Sector & Watchlist Dashboard")
+    st.title("📈 한국 주식 섹터 & 관심종목 대시보드")
 with hc2:
     st.markdown(
         f'<div style="text-align:right;padding-top:10px;">'
@@ -169,86 +169,89 @@ def check_alerts():
             if thr <= 0:
                 continue
             info, _ = get_stock_data(item["ticker"], 1)
-            if info and abs(info["change_pct"]) >= thr:
-                direction = "UP" if info["change_pct"] > 0 else "DOWN"
-                alerts.append(f"**{item['name']}** {direction} {info['change_pct']:+.2f}% (threshold: {thr}%)")
+            if info and abs(info["등락률(%)"]) >= thr:
+                direction = "📈 상승" if info["등락률(%)"] > 0 else "📉 하락"
+                alerts.append(f"**{item['name']}** {direction} {info['등락률(%)']:+.2f}% (설정: {thr}%)")
     return alerts
 
 alerts = check_alerts()
 if alerts:
-    st.info("🔔 **Alerts**\n\n" + "\n\n".join(alerts))
+    st.info("🔔 **관심 종목 알림**\n\n" + "\n\n".join(alerts))
 
-st.sidebar.header("⚙️ Settings")
+st.sidebar.header("⚙️ 설정")
 period_days = st.sidebar.selectbox(
-    "Period",
-    [("1D", 1), ("3D", 3), ("1W", 5), ("2W", 10), ("1M", 20), ("3M", 60)],
+    "조회 기간",
+    [("1일", 1), ("3일", 3), ("1주일", 5), ("2주일", 10), ("1개월", 20), ("3개월", 60)],
     format_func=lambda x: x[0],
     index=2,
 )[1]
 
 st.sidebar.divider()
-st.sidebar.header("⭐ Add Watchlist")
+st.sidebar.header("⭐ 관심 종목 등록")
 
 with st.sidebar.form("add_watchlist", clear_on_submit=True):
-    sector_sel = st.selectbox("Sector", SECTOR_LIST)
-    stock_input = st.text_input("Stock name or ticker")
-    alert_thr = st.number_input("Alert threshold (%)", min_value=0.0, max_value=50.0, value=3.0, step=0.5)
-    qty = st.number_input("Quantity", min_value=0, value=0, step=1)
-    buy_p = st.number_input("Buy price (KRW)", min_value=0, value=0, step=1000)
-    if st.form_submit_button("➕ Add") and stock_input:
+    sector_sel = st.selectbox("섹터 선택", SECTOR_LIST)
+    stock_input = st.text_input("종목명 또는 티커")
+    alert_thr = st.number_input("알림 임계값 (%)", min_value=0.0, max_value=50.0, value=3.0, step=0.5,
+                                help="이 종목의 등락률이 이 값 이상이면 상단에 알림이 표시됩니다. 0이면 알림 끄기")
+    qty = st.number_input("보유 수량", min_value=0, value=0, step=1,
+                          help="포트폴리오 수익률 계산에 사용됩니다. 없으면 0")
+    buy_p = st.number_input("매수 단가 (원)", min_value=0, value=0, step=1000,
+                            help="포트폴리오 수익률 계산에 사용됩니다. 없으면 0")
+    if st.form_submit_button("➕ 등록") and stock_input:
         name, ticker = search_ticker(stock_input)
         if name and ticker:
             wl = st.session_state.watchlist
             if any(i["ticker"] == ticker for i in wl.get(sector_sel, [])):
-                st.sidebar.warning(f"{name} already exists")
+                st.sidebar.warning(f"'{name}'은(는) 이미 등록되어 있습니다.")
             else:
                 wl.setdefault(sector_sel, []).append(
                     {"name": name, "ticker": ticker, "alert_threshold": alert_thr, "quantity": qty, "buy_price": buy_p}
                 )
                 save_watchlist(wl)
-                st.sidebar.success(f"✅ {name} added!")
+                st.sidebar.success(f"✅ '{name}' 등록 완료!")
                 st.rerun()
         else:
-            st.sidebar.error("Stock not found")
+            st.sidebar.error("종목을 찾을 수 없습니다.")
 
 if DEPLOY_MODE:
-    st.sidebar.success("Cloud mode (SQLite)")
+    st.sidebar.success("☁️ 배포 모드 (SQLite 저장)")
 else:
-    st.sidebar.info("Local mode (JSON)")
+    st.sidebar.info("💻 로컬 모드 (JSON 저장)")
 
 tab1, tab2, tab3, tab4, tab5, tab6 = st.tabs(
-    ["📊 Sector", "⭐ Watchlist", "🔍 Search", "🏆 Ranking", "📉 KOSDAQ", "🏭 Top10"]
+    ["📊 섹터 대시보드", "⭐ 관심 종목", "🔍 개별 종목 조회", "🏆 상위 종목 랭킹", "📉 코스닥 업종", "🏭 섹터별 상위 종목"]
 )
 
 with tab1:
-    st.subheader(f"KOSPI Sector ETF Performance ({period_days}D)")
+    st.subheader(f"KOSPI 섹터 ETF 성과 ({period_days}일 기준)")
     progress = st.progress(0)
     results = []
     for i, (name, ticker) in enumerate(SECTOR_ETFS.items()):
         data = get_sector_performance(ticker, period_days)
         if data:
-            results.append({"Sector": name, "Ticker": ticker, **data})
+            results.append({"섹터": name, "티커": ticker, **data})
         progress.progress((i + 1) / len(SECTOR_ETFS))
     progress.empty()
 
     if results:
-        df = pd.DataFrame(results).sort_values("change_pct", ascending=False)
+        df = pd.DataFrame(results).sort_values("등락률(%)", ascending=False)
         cols = st.columns(3)
         medals = ["🥇", "🥈", "🥉"]
         for idx in range(min(3, len(df))):
             row = df.iloc[idx]
             with cols[idx]:
                 st.metric(
-                    label=f"{medals[idx]} {row['Sector']}",
-                    value=f"{row['price']:,} KRW",
-                    delta=f"{row['change_pct']:+.2f}%",
+                    label=f"{medals[idx]} {row['섹터']}",
+                    value=f"{row['현재가']:,}원",
+                    delta=f"{row['등락률(%)']:+.2f}%",
                 )
         st.divider()
-        st.subheader("🗺️ Sector Heatmap")
+        st.subheader("🗺️ 섹터 히트맵")
         heatmap_cols = st.columns(6)
         for idx, (_, row) in enumerate(df.iterrows()):
             col_idx = idx % 6
-            change = row["change_pct"]
+            change = row["등락률(%)"]
             if change > 0:
                 bg = f"rgba(34,197,94,{min(change / 10, 1.0)})"
                 tc = "#fff" if change > 5 else "#000"
@@ -261,7 +264,7 @@ with tab1:
             with heatmap_cols[col_idx]:
                 st.markdown(
                     f'<div style="background-color:{bg};padding:12px;border-radius:8px;text-align:center;margin-bottom:8px;">'
-                    f'<div style="font-weight:bold;font-size:0.9rem;color:{tc};">{row["Sector"]}</div>'
+                    f'<div style="font-weight:bold;font-size:0.9rem;color:{tc};">{row["섹터"]}</div>'
                     f'<div style="font-size:1.1rem;font-weight:bold;color:{tc};">{change:+.2f}%</div>'
                     f'</div>',
                     unsafe_allow_html=True,
@@ -277,27 +280,27 @@ with tab1:
             return ""
 
         st.dataframe(
-            df.style.map(color_change, subset=["change_pct"]),
+            df.style.map(color_change, subset=["등락률(%)"]),
             use_container_width=True,
             hide_index=True,
         )
 
-        df["color"] = df["change_pct"].apply(lambda x: "Up" if x > 0 else "Down" if x < 0 else "Flat")
+        df["색상"] = df["등락률(%)"].apply(lambda x: "상승" if x > 0 else "하락" if x < 0 else "보합")
         fig = px.bar(
             df,
-            x="Sector",
-            y="change_pct",
-            color="color",
-            color_discrete_map={"Up": "#22c55e", "Down": "#ef4444", "Flat": "#9ca3af"},
-            text="change_pct",
+            x="섹터",
+            y="등락률(%)",
+            color="색상",
+            color_discrete_map={"상승": "#22c55e", "하락": "#ef4444", "보합": "#9ca3af"},
+            text="등락률(%)",
             height=500,
         )
         fig.update_traces(texttemplate="%{text}%", textposition="outside")
         fig.update_layout(showlegend=False)
         st.plotly_chart(fig, use_container_width=True)
 
-        st.subheader("📈 Top 5 Sector Trend")
-        top5 = df.head(5)["Sector"].tolist()
+        st.subheader("📈 상위 5개 섹터 추이")
+        top5 = df.head(5)["섹터"].tolist()
         end = get_kst_now()
         start = end - timedelta(days=period_days + 15)
         fig_line = go.Figure()
@@ -311,23 +314,23 @@ with tab1:
             except:
                 pass
         fig_line.update_layout(
-            title="Relative Return (Start=100)",
-            xaxis_title="Date",
-            yaxis_title="Relative Return",
+            title="상대 수익률 추이 (시작일=100)",
+            xaxis_title="날짜",
+            yaxis_title="상대 수익률",
             height=400,
             hovermode="x unified",
         )
         st.plotly_chart(fig_line, use_container_width=True)
     else:
-        st.warning("Failed to load sector data.")
+        st.warning("섹터 데이터를 불러오지 못했습니다. 잠시 후 다시 시도해주세요.")
 
 with tab2:
-    st.subheader("⭐ My Watchlist")
+    st.subheader("⭐ 내 관심 종목")
     wl = st.session_state.watchlist
     has_any = any(len(items) > 0 for items in wl.values())
 
     if not has_any:
-        st.info("No watchlist items yet. Add from sidebar!")
+        st.info("아직 등록된 관심 종목이 없습니다. 왼쪽 사이드바에서 등록해주세요!")
     else:
         total_buy = 0
         total_eval = 0
@@ -345,27 +348,27 @@ with tab2:
                     info, _ = get_stock_data(item["ticker"], 1)
                     if info:
                         sb += q * bp
-                        se += q * info["price"]
+                        se += q * info["현재가"]
             if sb > 0:
                 sr = (se - sb) / sb * 100
-                sector_summary.append({"Sector": sector, "Buy": sb, "Eval": se, "Return": round(sr, 2)})
+                sector_summary.append({"섹터": sector, "매수금액": sb, "평가금액": se, "수익률(%)": round(sr, 2)})
                 total_buy += sb
                 total_eval += se
 
         if total_buy > 0:
-            st.subheader("💼 Portfolio Summary")
+            st.subheader("💼 포트폴리오 요약")
             tr = (total_eval - total_buy) / total_buy * 100
             profit = total_eval - total_buy
             c1, c2, c3, c4 = st.columns(4)
-            c1.metric("Total Buy", f"{total_buy:,.0f} KRW")
-            c2.metric("Total Eval", f"{total_eval:,.0f} KRW")
-            c3.metric("Total Return", f"{tr:+.2f}%", delta=f"{profit:+,.0f} KRW")
-            c4.metric("Holdings", f"{sum(len(wl[s]) for s in SECTOR_LIST)}")
+            c1.metric("총 매수금액", f"{total_buy:,.0f}원")
+            c2.metric("총 평가금액", f"{total_eval:,.0f}원")
+            c3.metric("총 수익률", f"{tr:+.2f}%", delta=f"{profit:+,.0f}원")
+            c4.metric("보유 종목 수", f"{sum(len(wl[s]) for s in SECTOR_LIST)}개")
             fig_pie = px.pie(
                 pd.DataFrame(sector_summary),
-                values="Eval",
-                names="Sector",
-                title="Sector Allocation",
+                values="평가금액",
+                names="섹터",
+                title="섹터별 평가금액 비중",
                 hole=0.4,
             )
             st.plotly_chart(fig_pie, use_container_width=True)
@@ -375,43 +378,43 @@ with tab2:
             items = wl.get(sector, [])
             if len(items) == 0:
                 continue
-            with st.expander(f"📂 {sector} ({len(items)})", expanded=True):
+            with st.expander(f"📂 {sector} ({len(items)}개)", expanded=True):
                 stock_results = []
                 for item in items:
                     info, _ = get_stock_data(item["ticker"], period_days)
                     if info:
                         row = {
-                            "Name": item["name"],
-                            "Ticker": item["ticker"],
+                            "종목명": item["name"],
+                            "티커": item["ticker"],
                             **info,
-                            "Alert(%)": item.get("alert_threshold", 3.0),
-                            "Qty": item.get("quantity", 0),
-                            "Buy": item.get("buy_price", 0),
+                            "알림(%)": item.get("alert_threshold", 3.0),
+                            "수량": item.get("quantity", 0),
+                            "매수가": item.get("buy_price", 0),
                         }
                         q = item.get("quantity", 0)
                         bp = item.get("buy_price", 0)
                         if q > 0 and bp > 0:
-                            row["Profit(KRW)"] = int(q * info["price"] - q * bp)
-                            row["Profit(%)"] = round((q * info["price"] - q * bp) / (q * bp) * 100, 2)
+                            row["수익(원)"] = int(q * info["현재가"] - q * bp)
+                            row["수익률(%)"] = round((q * info["현재가"] - q * bp) / (q * bp) * 100, 2)
                         else:
-                            row["Profit(KRW)"] = "-"
-                            row["Profit(%)"] = "-"
+                            row["수익(원)"] = "-"
+                            row["수익률(%)"] = "-"
                         stock_results.append(row)
                     else:
                         stock_results.append(
                             {
-                                "Name": item["name"],
-                                "Ticker": item["ticker"],
-                                "price": "-",
-                                "change_pct": "-",
-                                "volume_bil": "-",
-                                "high": "-",
-                                "low": "-",
-                                "Alert(%)": item.get("alert_threshold", 3.0),
-                                "Qty": item.get("quantity", 0),
-                                "Buy": item.get("buy_price", 0),
-                                "Profit(KRW)": "-",
-                                "Profit(%)": "-",
+                                "종목명": item["name"],
+                                "티커": item["ticker"],
+                                "현재가": "-",
+                                "등락률(%)": "-",
+                                "거래대금(억)": "-",
+                                "고가": "-",
+                                "저가": "-",
+                                "알림(%)": item.get("alert_threshold", 3.0),
+                                "수량": item.get("quantity", 0),
+                                "매수가": item.get("buy_price", 0),
+                                "수익(원)": "-",
+                                "수익률(%)": "-",
                             }
                         )
 
@@ -427,22 +430,22 @@ with tab2:
                         return ""
 
                     dc = [
-                        "Name",
-                        "Ticker",
-                        "price",
-                        "change_pct",
-                        "volume_bil",
-                        "high",
-                        "low",
-                        "Qty",
-                        "Buy",
-                        "Profit(KRW)",
-                        "Profit(%)",
-                        "Alert(%)",
+                        "종목명",
+                        "티커",
+                        "현재가",
+                        "등락률(%)",
+                        "거래대금(억)",
+                        "고가",
+                        "저가",
+                        "수량",
+                        "매수가",
+                        "수익(원)",
+                        "수익률(%)",
+                        "알림(%)",
                     ]
                     dc = [c for c in dc if c in df_wl.columns]
                     st.dataframe(
-                        df_wl[dc].style.map(color_wl, subset=["change_pct", "Profit(%)"]),
+                        df_wl[dc].style.map(color_wl, subset=["등락률(%)", "수익률(%)"]),
                         use_container_width=True,
                         hide_index=True,
                     )
@@ -450,7 +453,7 @@ with tab2:
                     for idx, item in enumerate(items):
                         with cols[idx % 4]:
                             if st.button(
-                                f"🗑️ Delete {item['name']}",
+                                f"🗑️ {item['name']} 삭제",
                                 key=f"del_{sector}_{item['ticker']}",
                             ):
                                 wl[sector] = [i for i in wl[sector] if i["ticker"] != item["ticker"]]
@@ -460,30 +463,30 @@ with tab2:
         st.divider()
         cr1, cr2 = st.columns(2)
         with cr1:
-            if st.button("🗑️ Reset All", type="secondary"):
+            if st.button("🗑️ 전체 관심 종목 초기화", type="secondary"):
                 st.session_state.watchlist = {s: [] for s in SECTOR_LIST}
                 save_watchlist(st.session_state.watchlist)
                 st.rerun()
         with cr2:
             wl_json = json.dumps(st.session_state.watchlist, ensure_ascii=False, indent=2)
             st.download_button(
-                "💾 Backup",
+                "💾 관심 종목 백업 다운로드",
                 data=wl_json,
                 file_name="watchlist_backup.json",
                 mime="application/json",
             )
 
 with tab3:
-    st.subheader("🔍 Stock Detail Search")
+    st.subheader("🔍 개별 종목 상세 조회")
     c1, c2 = st.columns([3, 1])
     with c1:
         stock_input = st.text_input(
-            "Stock name or ticker (e.g. Samsung, 005930)",
-            "Samsung",
+            "종목명 또는 티커 입력 (예: 삼성전자, 005930)",
+            "삼성전자",
             key="tab3_stock",
         )
     with c2:
-        search_btn = st.button("🔎 Search", use_container_width=True, key="tab3_search")
+        search_btn = st.button("🔎 조회", use_container_width=True, key="tab3_search")
 
     if search_btn and stock_input:
         name, ticker = search_ticker(stock_input)
@@ -492,10 +495,10 @@ with tab3:
             if info and df_hist is not None:
                 st.success(f"📌 {name} ({ticker})")
                 c1, c2, c3, c4 = st.columns(4)
-                c1.metric("Price", f"{info['price']:,} KRW")
-                c2.metric("Change", f"{info['change_pct']:+.2f}%")
-                c3.metric("High", f"{info['high']:,} KRW")
-                c4.metric("Low", f"{info['low']:,} KRW")
+                c1.metric("현재가", f"{info['현재가']:,}원")
+                c2.metric("등락률", f"{info['등락률(%)']:+.2f}%")
+                c3.metric("고가", f"{info['고가']:,}원")
+                c4.metric("저가", f"{info['저가']:,}원")
 
                 fig = go.Figure(
                     data=[
@@ -510,27 +513,27 @@ with tab3:
                     ]
                 )
                 fig.update_layout(
-                    title=f"{name} Candlestick ({period_days}D)",
-                    xaxis_title="Date",
-                    yaxis_title="Price (KRW)",
+                    title=f"{name} 캔들 차트 ({period_days}일)",
+                    xaxis_title="날짜",
+                    yaxis_title="가격 (원)",
                     height=500,
                     xaxis_rangeslider_visible=False,
                 )
                 st.plotly_chart(fig, use_container_width=True)
 
-                fig_vol = px.bar(df_hist, x=df_hist.index, y="Volume", title="Volume", height=200)
+                fig_vol = px.bar(df_hist, x=df_hist.index, y="Volume", title="거래량", height=200)
                 st.plotly_chart(fig_vol, use_container_width=True)
 
                 st.divider()
                 add_sector = st.selectbox(
-                    "Add to watchlist sector",
+                    "관심 종목에 추가할 섹터 선택",
                     SECTOR_LIST,
                     key="add_sector_detail",
                 )
                 ca1, ca2, ca3 = st.columns(3)
                 with ca1:
                     add_alert = st.number_input(
-                        "Alert threshold (%)",
+                        "알림 임계값 (%)",
                         min_value=0.0,
                         value=3.0,
                         step=0.5,
@@ -538,7 +541,7 @@ with tab3:
                     )
                 with ca2:
                     add_qty = st.number_input(
-                        "Quantity",
+                        "보유 수량",
                         min_value=0,
                         value=0,
                         step=1,
@@ -546,16 +549,16 @@ with tab3:
                     )
                 with ca3:
                     add_buy = st.number_input(
-                        "Buy price",
+                        "매수 단가 (원)",
                         min_value=0,
                         value=0,
                         step=1000,
                         key="add_buy_detail",
                     )
-                if st.button("⭐ Add to Watchlist", key="add_btn_detail"):
+                if st.button("⭐ 관심 종목에 추가", key="add_btn_detail"):
                     wl = st.session_state.watchlist
                     if any(i["ticker"] == ticker for i in wl.get(add_sector, [])):
-                        st.warning("Already in watchlist")
+                        st.warning("이미 등록된 종목입니다.")
                     else:
                         wl.setdefault(add_sector, []).append(
                             {
@@ -567,24 +570,24 @@ with tab3:
                             }
                         )
                         save_watchlist(wl)
-                        st.success(f"✅ {name} added to {add_sector}!")
+                        st.success(f"✅ '{name}'을(를) [{add_sector}] 섹터에 추가했습니다!")
                         st.rerun()
             else:
-                st.error("Failed to load stock data")
+                st.error("주가 데이터를 불러올 수 없습니다.")
         else:
-            st.error("Stock not found")
+            st.error("종목을 찾을 수 없습니다.")
 
 with tab4:
-    st.subheader("🏆 Top 20 Ranking")
-    st.info("Coming soon - Market cap ranking requires additional data source")
+    st.subheader("🏆 시총 상위 200개 중 기간별 상승률 TOP 20")
+    st.info("준비 중입니다. pykrx 데이터 소스가 필요합니다.")
 
 with tab5:
-    st.subheader("📉 KOSDAQ Sectors")
-    st.info("Coming soon - KOSDAQ sector indices require additional data source")
+    st.subheader("📉 코스닥 업종별 지수 등락률")
+    st.info("준비 중입니다. pykrx 데이터 소스가 필요합니다.")
 
 with tab6:
-    st.subheader("🏭 Sector Top 10")
-    st.info("Coming soon - Sector stock mapping requires additional data source")
+    st.subheader("🏭 섹터별 시총 상위 10개 종목")
+    st.info("준비 중입니다. pykrx 데이터 소스가 필요합니다.")
 
 st.divider()
-st.caption("Data: FinanceDataReader | Personal use only")
+st.caption("📌 데이터 출처: FinanceDataReader | 개인용 비상업적 사용")
