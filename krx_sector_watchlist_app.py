@@ -102,7 +102,7 @@ def get_sector_performance(ticker, days):
         ep = df['Close'].iloc[-1]
         return {
             "현재가": int(ep),
-            "등락률(%)": round((ep - sp) / sp * 100, 2),
+            "등락률(%)": round((ep - sp) / sp * 100, 1),
             "거래대금(억)": round((df['Volume'] * df['Close']).mean() / 1e8, 1),
         }
     except:
@@ -119,7 +119,7 @@ def get_stock_data(ticker, days):
         chg = (df['Close'].iloc[-1] - df['Close'].iloc[0]) / df['Close'].iloc[0] * 100
         info = {
             "현재가": int(df['Close'].iloc[-1]),
-            "등락률(%)": round(chg, 2),
+            "등락률(%)": round(chg, 1),
             "거래대금(억)": round((df['Volume'].iloc[-1] * df['Close'].iloc[-1]) / 1e8, 1),
             "고가": int(df['High'].max()),
             "저가": int(df['Low'].min()),
@@ -143,6 +143,55 @@ def search_ticker(name_or_code):
         return matched.iloc[0]['Name'], matched.iloc[0]['Code']
     except:
         return None, None
+
+@st.cache_data(ttl=300)
+def get_sector_top_stocks(sector_name, days):
+    """섹터 ETF와 유사한 종목들을 FinanceDataReader로 검색 (섹터명 기반 키워드 매칭)"""
+    try:
+        keyword_map = {
+            "반도체": ["반도체", "삼성전자", "SK하이닉스", "삼성전기", "DB하이텍"],
+            "2차전지": ["2차전지", "LG에너지솔루션", "삼성SDI", "포스코퓨처엠", "에코프로"],
+            "바이오": ["바이오", "셀트리온", "삼성바이오로직스", "LG화학"],
+            "은행": ["은행", "KB금융", "신한지주", "하나금융지주", "우리금융지주"],
+            "자동차": ["자동차", "현대차", "기아", "현대모비스"],
+            "증권": ["증권", "삼성증권", "미래에셋", "한국금융지주"],
+            "IT": ["소프트웨어", "네이버", "카카오", "엔씨소프트"],
+            "에너지화학": ["에너지", "화학", "LG화학", "S-Oil", "SK이노베이션"],
+            "철강": ["철강", "포스코홀딩스", "현대제철"],
+            "건설": ["건설", "현대건설", "대우건설", "삼성엔지니어링"],
+            "운송": ["운송", "대한항공", "한진칼", "현대글로비스"],
+            "미디어&엔터": ["미디어", "엔터", "CJ", "SM", "JYP", "YG"],
+            "기계장비": ["기계", "두산에너빌리티", "한온시스템"],
+            "보험": ["보험", "삼성생명", "한화손해보험"],
+            "유통": ["유통", "이마트", "신세계", "GS리테일"],
+            "필수소비재": ["식품", "음료", "오뚜기", "농심", "CJ제일제당"],
+            "임의소비재": ["화장품", "아모레퍼시픽", "LG생활건강"],
+            "코스피200": ["삼성전자", "SK하이닉스", "현대차", "기아", "LG에너지솔루션"],
+        }
+        keywords = keyword_map.get(sector_name, [sector_name])
+        kospi = fdr.StockListing('KOSPI')
+        kosdaq = fdr.StockListing('KOSDAQ')
+        all_list = pd.concat([kospi, kosdaq])
+        
+        matched = []
+        for kw in keywords:
+            found = all_list[all_list['Name'].str.contains(kw, case=False, na=False)]
+            for _, row in found.iterrows():
+                if len(matched) < 10:
+                    info, _ = get_stock_data(row['Code'], days)
+                    if info:
+                        matched.append({
+                            "종목명": row['Name'],
+                            "티커": row['Code'],
+                            "현재가": info['현재가'],
+                            "등락률(%)": info['등락률(%)'],
+                            "거래대금(억)": info['거래대금(억)'],
+                        })
+        if matched:
+            return pd.DataFrame(matched)
+        return None
+    except:
+        return None
 
 st_autorefresh(interval=60 * 1000, limit=None, key="clock_refresh")
 now_kst = get_kst_now()
@@ -171,7 +220,7 @@ def check_alerts():
             info, _ = get_stock_data(item["ticker"], 1)
             if info and abs(info["등락률(%)"]) >= thr:
                 direction = "📈 상승" if info["등락률(%)"] > 0 else "📉 하락"
-                alerts.append(f"**{item['name']}** {direction} {info['등락률(%)']:+.2f}% (설정: {thr}%)")
+                alerts.append(f"**{item['name']}** {direction} {info['등락률(%)']:+.1f}% (설정: {thr}%)")
     return alerts
 
 alerts = check_alerts()
@@ -244,7 +293,7 @@ with tab1:
                 st.metric(
                     label=f"{medals[idx]} {row['섹터']}",
                     value=f"{row['현재가']:,}원",
-                    delta=f"{row['등락률(%)']:+.2f}%",
+                    delta=f"{row['등락률(%)']:+.1f}%",
                 )
         st.divider()
         st.subheader("🗺️ 섹터 히트맵")
@@ -253,10 +302,10 @@ with tab1:
             col_idx = idx % 6
             change = row["등락률(%)"]
             if change > 0:
-                bg = f"rgba(34,197,94,{min(change / 10, 1.0)})"
+                bg = f"rgba(239, 68, 68, {min(change/10, 1.0)})"  # 빨강 계열
                 tc = "#fff" if change > 5 else "#000"
             elif change < 0:
-                bg = f"rgba(239,68,68,{min(abs(change) / 10, 1.0)})"
+                bg = f"rgba(59, 130, 246, {min(abs(change)/10, 1.0)})"  # 파랑 계열
                 tc = "#fff" if change < -5 else "#000"
             else:
                 bg = "#9ca3af"
@@ -265,7 +314,7 @@ with tab1:
                 st.markdown(
                     f'<div style="background-color:{bg};padding:12px;border-radius:8px;text-align:center;margin-bottom:8px;">'
                     f'<div style="font-weight:bold;font-size:0.9rem;color:{tc};">{row["섹터"]}</div>'
-                    f'<div style="font-size:1.1rem;font-weight:bold;color:{tc};">{change:+.2f}%</div>'
+                    f'<div style="font-size:1.1rem;font-weight:bold;color:{tc};">{change:+.1f}%</div>'
                     f'</div>',
                     unsafe_allow_html=True,
                 )
@@ -274,9 +323,9 @@ with tab1:
         def color_change(val):
             if isinstance(val, (int, float)):
                 if val > 0:
-                    return "color: #22c55e; font-weight: bold"
-                elif val < 0:
                     return "color: #ef4444; font-weight: bold"
+                elif val < 0:
+                    return "color: #3b82f6; font-weight: bold"
             return ""
 
         st.dataframe(
@@ -291,7 +340,7 @@ with tab1:
             x="섹터",
             y="등락률(%)",
             color="색상",
-            color_discrete_map={"상승": "#22c55e", "하락": "#ef4444", "보합": "#9ca3af"},
+            color_discrete_map={"상승": "#ef4444", "하락": "#3b82f6", "보합": "#9ca3af"},
             text="등락률(%)",
             height=500,
         )
@@ -321,6 +370,24 @@ with tab1:
             hovermode="x unified",
         )
         st.plotly_chart(fig_line, use_container_width=True)
+
+        st.divider()
+        st.subheader("📋 섹터 선택 → 관련 종목 보기")
+        selected_sector = st.selectbox("섹터를 선택하면 관련 종목을 보여줍니다", df["섹터"].tolist(), key="sector_top_select")
+        top_stocks = get_sector_top_stocks(selected_sector, period_days)
+        if top_stocks is not None and not top_stocks.empty:
+            def color_top(val):
+                if isinstance(val, (int, float)):
+                    if val > 0: return "color: #ef4444; font-weight: bold"
+                    elif val < 0: return "color: #3b82f6; font-weight: bold"
+                return ""
+            st.dataframe(
+                top_stocks.style.map(color_top, subset=["등락률(%)"]),
+                use_container_width=True,
+                hide_index=True,
+            )
+        else:
+            st.info(f"{selected_sector} 섹터의 관련 종목 데이터를 불러올 수 없습니다.")
     else:
         st.warning("섹터 데이터를 불러오지 못했습니다. 잠시 후 다시 시도해주세요.")
 
@@ -351,7 +418,7 @@ with tab2:
                         se += q * info["현재가"]
             if sb > 0:
                 sr = (se - sb) / sb * 100
-                sector_summary.append({"섹터": sector, "매수금액": sb, "평가금액": se, "수익률(%)": round(sr, 2)})
+                sector_summary.append({"섹터": sector, "매수금액": sb, "평가금액": se, "수익률(%)": round(sr, 1)})
                 total_buy += sb
                 total_eval += se
 
@@ -362,7 +429,7 @@ with tab2:
             c1, c2, c3, c4 = st.columns(4)
             c1.metric("총 매수금액", f"{total_buy:,.0f}원")
             c2.metric("총 평가금액", f"{total_eval:,.0f}원")
-            c3.metric("총 수익률", f"{tr:+.2f}%", delta=f"{profit:+,.0f}원")
+            c3.metric("총 수익률", f"{tr:+.1f}%", delta=f"{profit:+,.0f}원")
             c4.metric("보유 종목 수", f"{sum(len(wl[s]) for s in SECTOR_LIST)}개")
             fig_pie = px.pie(
                 pd.DataFrame(sector_summary),
@@ -395,7 +462,7 @@ with tab2:
                         bp = item.get("buy_price", 0)
                         if q > 0 and bp > 0:
                             row["수익(원)"] = int(q * info["현재가"] - q * bp)
-                            row["수익률(%)"] = round((q * info["현재가"] - q * bp) / (q * bp) * 100, 2)
+                            row["수익률(%)"] = round((q * info["현재가"] - q * bp) / (q * bp) * 100, 1)
                         else:
                             row["수익(원)"] = "-"
                             row["수익률(%)"] = "-"
@@ -424,9 +491,9 @@ with tab2:
                     def color_wl(val):
                         if isinstance(val, (int, float)):
                             if val > 0:
-                                return "color: #22c55e; font-weight: bold"
-                            elif val < 0:
                                 return "color: #ef4444; font-weight: bold"
+                            elif val < 0:
+                                return "color: #3b82f6; font-weight: bold"
                         return ""
 
                     dc = [
@@ -491,12 +558,13 @@ with tab3:
     if search_btn and stock_input:
         name, ticker = search_ticker(stock_input)
         if name and ticker:
-            info, df_hist = get_stock_data(ticker, period_days)
+            # 1개월(20일) 고정으로 캔들차트 조회
+            info, df_hist = get_stock_data(ticker, 20)
             if info and df_hist is not None:
                 st.success(f"📌 {name} ({ticker})")
                 c1, c2, c3, c4 = st.columns(4)
                 c1.metric("현재가", f"{info['현재가']:,}원")
-                c2.metric("등락률", f"{info['등락률(%)']:+.2f}%")
+                c2.metric("등락률", f"{info['등락률(%)']:+.1f}%")
                 c3.metric("고가", f"{info['고가']:,}원")
                 c4.metric("저가", f"{info['저가']:,}원")
 
@@ -513,7 +581,7 @@ with tab3:
                     ]
                 )
                 fig.update_layout(
-                    title=f"{name} 캔들 차트 ({period_days}일)",
+                    title=f"{name} 캔들 차트 (1개월)",
                     xaxis_title="날짜",
                     yaxis_title="가격 (원)",
                     height=500,
@@ -521,7 +589,16 @@ with tab3:
                 )
                 st.plotly_chart(fig, use_container_width=True)
 
-                fig_vol = px.bar(df_hist, x=df_hist.index, y="Volume", title="거래량", height=200)
+                # 거래량 차트: 크기 일정하게
+                fig_vol = go.Figure()
+                fig_vol.add_trace(go.Bar(x=df_hist.index, y=df_hist['Volume'], name="거래량", marker_color="steelblue"))
+                fig_vol.update_layout(
+                    title="거래량",
+                    xaxis_title="날짜",
+                    yaxis_title="거래량",
+                    height=350,
+                    margin=dict(l=40, r=40, t=40, b=40),
+                )
                 st.plotly_chart(fig_vol, use_container_width=True)
 
                 st.divider()
@@ -579,15 +656,15 @@ with tab3:
 
 with tab4:
     st.subheader("🏆 시총 상위 200개 중 기간별 상승률 TOP 20")
-    st.info("준비 중입니다. pykrx 데이터 소스가 필요합니다.")
+    st.info("준비 중입니다. 추가 데이터 소스가 필요합니다.")
 
 with tab5:
     st.subheader("📉 코스닥 업종별 지수 등락률")
-    st.info("준비 중입니다. pykrx 데이터 소스가 필요합니다.")
+    st.info("준비 중입니다. 추가 데이터 소스가 필요합니다.")
 
 with tab6:
     st.subheader("🏭 섹터별 시총 상위 10개 종목")
-    st.info("준비 중입니다. pykrx 데이터 소스가 필요합니다.")
+    st.info("준비 중입니다. 추가 데이터 소스가 필요합니다.")
 
 st.divider()
 st.caption("📌 데이터 출처: FinanceDataReader | 개인용 비상업적 사용")
